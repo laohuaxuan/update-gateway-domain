@@ -1,0 +1,2 @@
+{"time":"2026-07-09T10:35:16+08:00","account_id":"PJOpenPublic","action":"single_update","gateway_id":"gw-f9d617c4fe254170b802cf8195f0c393","domain":"admin-new.staging.openxlab.org.cn","tls_version":"tlsv1.2","dry_run":false,"result":"success"}
+{"time":"2026-07-09T11:10:44+08:00","account_id":"PJOpenPublic","action":"single_update","gateway_id":"gw-1d376f5a78f14554b3656ea73a16ea21","domain":"admin-collaboration.dev.opencompass.org.cn","tls_version":"tlsv1.2","dry_run":false,"result":"success"}

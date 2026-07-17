@@ -1,0 +1,41 @@
+# 服务监听配置
+server:
+  # HTTP 服务端口
+  port: 8080
+
+# 阿里云 MSE 账号与网关配置
+aliyun:
+  # OpenAPI 返回语言：zh / en
+  accept_language: zh
+
+# 批量/单次更新的公共默认参数
+update:
+  protocol: HTTPS              # 协议类型：HTTP / HTTPS
+  must_https: false            # 是否强制 HTTPS
+  http2: close          # Http2 配置：open / close / globalConfig
+  batch_tls_version: tlsv1.2   # 兜底 TLS 版本（当网关未配置 batch_tls_version 时生效）
+
+# 审计日志配置
+audit:
+  enabled: true                # 是否开启审计日志
+  file: "./logs/audit.log"     # 审计日志文件路径（JSON 行格式）
+
+# 更新接口鉴权配置
+auth:
+  update_token: "xxxxxxx"
+  jwt_secret: "your-jwt-secret-key-change-in-production"
+  token_expiry: "24h"
+  db_host: "127.0.0.1"
+  db_port: 3306
+  db_user: "root"
+  db_password: "xxxxxx"
+  db_name: "gateway_tls"
+  root_initial_name: "root"
+  root_initial_phone: "xxxxxxx"
+  root_initial_email: "xxxx@163.com"
+  root_initial_password: "xxxxxx"
+  smtp_host: "smtp.163.com"
+  smtp_port: 465
+  smtp_user: "example@163.com"
+  smtp_pass: "xxxxxx"
+  smtp_from: "example@163.com"
