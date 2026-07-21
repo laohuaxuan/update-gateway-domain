@@ -1,9 +1,45 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+function EyeToggleIcon({ visible }) {
+  if (visible) {
+    return (
+      <svg className="eye-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="eye-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3 3l18 18"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10.6 6.5A11.6 11.6 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-3 3.7M6.2 8.2A17 17 0 0 0 2 12s3.5 6 10 6c1.2 0 2.3-.2 3.3-.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [captchaCode, setCaptchaCode] = useState("");
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaImageUrl, setCaptchaImageUrl] = useState("");
@@ -119,13 +155,24 @@ export default function Login({ onLogin }) {
           </div>
           <div>
             <label>密码</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              placeholder="请输入密码"
-            />
+            <div className="password-input-row">
+              <input
+                type={passwordVisible ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                placeholder="请输入密码"
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                title={passwordVisible ? "隐藏密码" : "显示密码"}
+                aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
+                onClick={() => setPasswordVisible((v) => !v)}
+              >
+                <EyeToggleIcon visible={passwordVisible} />
+              </button>
+            </div>
           </div>
           <div className="captcha-section">
             <label>验证码</label>

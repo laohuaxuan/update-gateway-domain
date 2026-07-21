@@ -1088,6 +1088,40 @@ body.dark .avatar {
   cursor: not-allowed;
 }
 
+.auth-card .password-input-row {
+  width: 100%;
+}
+
+.auth-card .password-toggle-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  box-shadow: none;
+}
+
+.auth-card .password-toggle-btn:hover:not(:disabled) {
+  background: #eef2ff;
+  color: #334155;
+  transform: none;
+  box-shadow: none;
+}
+
+body.dark .auth-card .password-toggle-btn {
+  background: #0f3460;
+  border-color: #3d5a80;
+  color: #e0e0e0;
+}
+
+body.dark .auth-card .password-toggle-btn:hover:not(:disabled) {
+  background: #1a4a7a;
+  color: #e0e0e0;
+}
+
 .auth-links {
   display: flex;
   justify-content: center;
