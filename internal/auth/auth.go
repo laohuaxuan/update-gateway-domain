@@ -90,9 +90,10 @@ func (a *Auth) ensureRootUser(cfg *Config) error {
 
 		newUser := &store.User{
 			Name:         cfg.RootInitialName,
-			Phone:        cfg.RootInitialPhone,
+			Phone:        store.PhonePtr(cfg.RootInitialPhone),
 			Email:        cfg.RootInitialEmail,
 			PasswordHash: string(hash),
+			AuthSource:   store.AuthSourceLocal,
 			Role:         store.RoleRoot,
 		}
 
@@ -100,10 +101,10 @@ func (a *Auth) ensureRootUser(cfg *Config) error {
 	}
 
 	updates := make(map[string]interface{})
-	if user.Phone != cfg.RootInitialPhone {
+	if user.PhoneValue() != cfg.RootInitialPhone {
 		existingPhoneUser, _ := a.store.GetUserByPhone(cfg.RootInitialPhone)
 		if existingPhoneUser == nil || existingPhoneUser.ID == user.ID {
-			updates["phone"] = cfg.RootInitialPhone
+			updates["phone"] = store.PhonePtr(cfg.RootInitialPhone)
 		}
 	}
 	if user.Email != cfg.RootInitialEmail {

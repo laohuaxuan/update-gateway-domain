@@ -133,11 +133,43 @@ export default function App() {
   const [userName, setUserName] = useState(localStorage.getItem("name") || "");
   const [userEmail, setUserEmail] = useState(localStorage.getItem("email") || "");
   const [userPhone, setUserPhone] = useState(localStorage.getItem("phone") || "");
+  const [authSource, setAuthSource] = useState(localStorage.getItem("auth_source") || "local");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuCloseTimer = useRef(null);
+  const userMenuRef = useRef(null);
 
   const navigate = useNavigate();
 
   const isAdmin = role === "admin" || role === "root";
   const isRoot = role === "root";
+  const isLDAPUser = (u) => String(u?.auth_source || "").toLowerCase() === "ldap";
+  const authSourceLabel = (u) => (isLDAPUser(u) ? "ldap" : "系统");
+
+  const openUserMenu = () => {
+    if (userMenuCloseTimer.current) {
+      clearTimeout(userMenuCloseTimer.current);
+      userMenuCloseTimer.current = null;
+    }
+    setUserMenuOpen(true);
+  };
+
+  const closeUserMenu = () => {
+    if (userMenuCloseTimer.current) {
+      clearTimeout(userMenuCloseTimer.current);
+      userMenuCloseTimer.current = null;
+    }
+    setUserMenuOpen(false);
+  };
+
+  const scheduleCloseUserMenu = () => {
+    if (userMenuCloseTimer.current) {
+      clearTimeout(userMenuCloseTimer.current);
+    }
+    userMenuCloseTimer.current = setTimeout(() => {
+      setUserMenuOpen(false);
+      userMenuCloseTimer.current = null;
+    }, 3000);
+  };
 
   const authHeaders = {
     "Content-Type": "application/json",
@@ -160,10 +192,15 @@ export default function App() {
       name: userName,
       phone: userPhone,
       email: userEmail,
+      auth_source: authSource,
     });
   };
 
   const openPasswordModal = () => {
+    if (isLDAPUser({ auth_source: authSource })) {
+      showMessage("请在AD域修改账号密码", "error");
+      return;
+    }
     setPasswordVisible({ old: false, next: false, confirm: false });
     setPasswordModalMessage("");
     setPasswordModalMessageType("success");
@@ -266,18 +303,22 @@ export default function App() {
       setUserName(data.name || "");
       setUserEmail(data.email || "");
       setUserPhone(data.phone || "");
+      setAuthSource(data.auth_source || "local");
       localStorage.setItem("role", data.role || "");
       localStorage.setItem("name", data.name || "");
       localStorage.setItem("email", data.email || "");
       localStorage.setItem("phone", data.phone || "");
+      localStorage.setItem("auth_source", data.auth_source || "local");
     } catch {
       localStorage.removeItem("token");
       localStorage.removeItem("role");
       localStorage.removeItem("name");
       localStorage.removeItem("email");
       localStorage.removeItem("phone");
+      localStorage.removeItem("auth_source");
       setToken("");
       setRole("");
+      setAuthSource("local");
       navigate("/login");
     }
   };
@@ -288,8 +329,10 @@ export default function App() {
     localStorage.removeItem("name");
     localStorage.removeItem("email");
     localStorage.removeItem("phone");
+    localStorage.removeItem("auth_source");
     setToken("");
     setRole("");
+    setAuthSource("local");
     navigate("/login");
   };
 
@@ -582,6 +625,27 @@ export default function App() {
       // ignore
     }
   }, [darkMode]);
+
+  useEffect(() => {
+    return () => {
+      if (userMenuCloseTimer.current) clearTimeout(userMenuCloseTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!userMenuOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        closeUserMenu();
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [userMenuOpen]);
 
   useEffect(() => {
     setAuditGateway("");
@@ -1581,6 +1645,7 @@ export default function App() {
           <thead>
             <tr>
               <th>姓名</th>
+              <th>来源</th>
               <th>手机号</th>
               <th>邮箱</th>
               <th>角色</th>
@@ -1591,7 +1656,8 @@ export default function App() {
             {users.map((u) => (
               <tr key={u.id}>
                 <td>{u.name}</td>
-                <td>{u.phone}</td>
+                <td>{authSourceLabel(u)}</td>
+                <td>{u.phone || ""}</td>
                 <td>{u.email}</td>
                 <td>{u.role === "root" ? "超级管理员" : u.role === "admin" ? "管理员" : "观察者"}</td>
                 <td>
@@ -1605,13 +1671,19 @@ export default function App() {
                       变更角色
                     </button>
                     <span className="btn-spacing">|</span>
-                    <button
-                      type="button"
-                      className="link-btn"
-                      onClick={() => setResetPasswordModal({ id: u.id, name: u.name })}
-                    >
-                      重置密码
-                    </button>
+                    {isLDAPUser(u) ? (
+                      <span className="muted-text" title="LDAP 用户密码由 AD 域管理">
+                        AD域账号
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() => setResetPasswordModal({ id: u.id, name: u.name })}
+                      >
+                        重置密码
+                      </button>
+                    )}
                     <span className="btn-spacing">|</span>
                     <button
                       type="button"
@@ -1852,10 +1924,19 @@ export default function App() {
                 {darkMode ? "明亮" : "暗黑"}
               </button>
             </div>
-            <div className="user-menu">
+            <div
+              ref={userMenuRef}
+              className={`user-menu${userMenuOpen ? " keep-open" : ""}`}
+              onMouseEnter={openUserMenu}
+              onMouseLeave={scheduleCloseUserMenu}
+            >
               <button
+                type="button"
                 className="user-btn"
-                onClick={openProfileModal}
+                onClick={() => {
+                  if (userMenuOpen) closeUserMenu();
+                  else openUserMenu();
+                }}
               >
                 <span className="avatar">
                   {userName ? userName.charAt(0).toUpperCase() : "U"}
@@ -1867,14 +1948,29 @@ export default function App() {
                   </span>
                 </span>
               </button>
-              <div className="user-dropdown">
+              <div
+                className="user-dropdown"
+                onMouseEnter={openUserMenu}
+                onMouseLeave={scheduleCloseUserMenu}
+              >
                 <button
+                  type="button"
                   className="dropdown-item"
-                  onClick={openProfileModal}
+                  onClick={() => {
+                    closeUserMenu();
+                    openProfileModal();
+                  }}
                 >
                   👤 个人设置
                 </button>
-                <button className="dropdown-item logout-btn" onClick={handleLogout}>
+                <button
+                  type="button"
+                  className="dropdown-item logout-btn"
+                  onClick={() => {
+                    closeUserMenu();
+                    handleLogout();
+                  }}
+                >
                   🚪 退出登录
                 </button>
               </div>
@@ -1887,16 +1983,20 @@ export default function App() {
 
       {roleModal && (
         <div className="modal-mask" onClick={() => setRoleModal(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card role-modal" onClick={(e) => e.stopPropagation()}>
             <h2>变更角色 - {roleModal.name}</h2>
-            <select
-              value={roleModal.role}
-              onChange={(e) => updateUserRole(roleModal.id, e.target.value)}
-            >
-              <option value="watcher">观察者</option>
-              <option value="admin">管理员</option>
-            </select>
-            <button onClick={() => setRoleModal(null)}>取消</button>
+            <div className="role-modal-actions">
+              <select
+                value={roleModal.role}
+                onChange={(e) => updateUserRole(roleModal.id, e.target.value)}
+              >
+                <option value="watcher">观察者</option>
+                <option value="admin">管理员</option>
+              </select>
+              <button type="button" onClick={() => setRoleModal(null)}>
+                取消
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2002,9 +2102,10 @@ export default function App() {
               <label>手机号</label>
               <input
                 type="text"
-                value={profileModal.phone}
+                value={profileModal.phone || ""}
                 readOnly
                 className="readonly-input"
+                placeholder={isLDAPUser(profileModal) ? "可选，未从 AD 同步可留空" : ""}
               />
             </div>
             <div className="form-group">
@@ -2015,10 +2116,19 @@ export default function App() {
                 readOnly
                 className="readonly-input"
               />
+              {isLDAPUser(profileModal) && (
+                <p className="form-hint">LDAP 账号邮箱由 AD 同步，不可在此修改</p>
+              )}
             </div>
             <div className="row">
-              <button onClick={openPasswordModal}>修改账号密码</button>
-              <button onClick={() => setProfileModal(null)}>取消</button>
+              {isLDAPUser(profileModal) ? (
+                <p className="form-hint" style={{ margin: 0, flex: 1 }}>
+                  请在AD域修改账号密码
+                </p>
+              ) : (
+                <button onClick={openPasswordModal}>修改账号密码</button>
+              )}
+              <button onClick={() => setProfileModal(null)}>关闭</button>
             </div>
           </div>
         </div>

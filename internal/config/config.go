@@ -42,23 +42,42 @@ type AuditConfig struct {
 }
 
 type AuthConfig struct {
-	UpdateToken         string `yaml:"update_token"`
-	JWTSecret           string `yaml:"jwt_secret"`
-	TokenExpiry         string `yaml:"token_expiry"`
-	SMTPHost            string `yaml:"smtp_host"`
-	SMTPPort            int    `yaml:"smtp_port"`
-	SMTPUser            string `yaml:"smtp_user"`
-	SMTPPass            string `yaml:"smtp_pass"`
-	SMTPFrom            string `yaml:"smtp_from"`
-	RootInitialName     string `yaml:"root_initial_name"`
-	RootInitialPhone    string `yaml:"root_initial_phone"`
-	RootInitialEmail    string `yaml:"root_initial_email"`
-	RootInitialPassword string `yaml:"root_initial_password"`
-	DBHost              string `yaml:"db_host"`
-	DBPort              int    `yaml:"db_port"`
-	DBUser              string `yaml:"db_user"`
-	DBPassword          string `yaml:"db_password"`
-	DBName              string `yaml:"db_name"`
+	UpdateToken         string     `yaml:"update_token"`
+	JWTSecret           string     `yaml:"jwt_secret"`
+	TokenExpiry         string     `yaml:"token_expiry"`
+	SMTPHost            string     `yaml:"smtp_host"`
+	SMTPPort            int        `yaml:"smtp_port"`
+	SMTPUser            string     `yaml:"smtp_user"`
+	SMTPPass            string     `yaml:"smtp_pass"`
+	SMTPFrom            string     `yaml:"smtp_from"`
+	RootInitialName     string     `yaml:"root_initial_name"`
+	RootInitialPhone    string     `yaml:"root_initial_phone"`
+	RootInitialEmail    string     `yaml:"root_initial_email"`
+	RootInitialPassword string     `yaml:"root_initial_password"`
+	DBHost              string     `yaml:"db_host"`
+	DBPort              int        `yaml:"db_port"`
+	DBUser              string     `yaml:"db_user"`
+	DBPassword          string     `yaml:"db_password"`
+	DBName              string     `yaml:"db_name"`
+	LDAP                LDAPConfig `yaml:"ldap"`
+}
+
+// LDAPConfig 第三方 LDAP 登录（登录页展示入口；首次登录自动创建观察者）。
+type LDAPConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	Host            string `yaml:"host"`
+	Port            int    `yaml:"port"`
+	UseSSL          bool   `yaml:"use_ssl"`
+	StartTLS        bool   `yaml:"start_tls"`
+	SkipTLSVerify   bool   `yaml:"skip_tls_verify"`
+	BindDN          string `yaml:"bind_dn"`
+	BindPassword    string `yaml:"bind_password"`
+	BaseDN          string `yaml:"base_dn"`
+	UserFilter      string `yaml:"user_filter"` // 必须含 %s，如 (uid=%s) 或 (sAMAccountName=%s)
+	UsernameAttr    string `yaml:"username_attr"`
+	EmailAttr       string `yaml:"email_attr"`
+	DisplayNameAttr string `yaml:"display_name_attr"`
+	Label           string `yaml:"label"` // 登录页按钮文案
 }
 
 func Load(path string) (*Config, error) {
@@ -118,6 +137,37 @@ func normalize(cfg *Config) {
 	cfg.Auth.RootInitialPassword = strings.TrimSpace(cfg.Auth.RootInitialPassword)
 	if cfg.Auth.TokenExpiry == "" {
 		cfg.Auth.TokenExpiry = "24h"
+	}
+
+	cfg.Auth.LDAP.Host = strings.TrimSpace(cfg.Auth.LDAP.Host)
+	cfg.Auth.LDAP.BindDN = strings.TrimSpace(cfg.Auth.LDAP.BindDN)
+	cfg.Auth.LDAP.BaseDN = strings.TrimSpace(cfg.Auth.LDAP.BaseDN)
+	cfg.Auth.LDAP.UserFilter = strings.TrimSpace(cfg.Auth.LDAP.UserFilter)
+	if cfg.Auth.LDAP.UserFilter == "" {
+		cfg.Auth.LDAP.UserFilter = "(uid=%s)"
+	}
+	cfg.Auth.LDAP.UsernameAttr = strings.TrimSpace(cfg.Auth.LDAP.UsernameAttr)
+	if cfg.Auth.LDAP.UsernameAttr == "" {
+		cfg.Auth.LDAP.UsernameAttr = "uid"
+	}
+	cfg.Auth.LDAP.EmailAttr = strings.TrimSpace(cfg.Auth.LDAP.EmailAttr)
+	if cfg.Auth.LDAP.EmailAttr == "" {
+		cfg.Auth.LDAP.EmailAttr = "mail"
+	}
+	cfg.Auth.LDAP.DisplayNameAttr = strings.TrimSpace(cfg.Auth.LDAP.DisplayNameAttr)
+	if cfg.Auth.LDAP.DisplayNameAttr == "" {
+		cfg.Auth.LDAP.DisplayNameAttr = "cn"
+	}
+	cfg.Auth.LDAP.Label = strings.TrimSpace(cfg.Auth.LDAP.Label)
+	if cfg.Auth.LDAP.Label == "" {
+		cfg.Auth.LDAP.Label = "LDAP"
+	}
+	if cfg.Auth.LDAP.Port == 0 {
+		if cfg.Auth.LDAP.UseSSL {
+			cfg.Auth.LDAP.Port = 636
+		} else {
+			cfg.Auth.LDAP.Port = 389
+		}
 	}
 }
 

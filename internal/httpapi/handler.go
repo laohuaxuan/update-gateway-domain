@@ -12,16 +12,21 @@ import (
 	"time"
 
 	"update-gateway-domain/internal/auth"
+	"update-gateway-domain/internal/ldapauth"
 	"update-gateway-domain/internal/service"
 	"update-gateway-domain/internal/store"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 var numericRegex = regexp.MustCompile(`^\d+$`)
 var hasUppercaseRegex = regexp.MustCompile(`[A-Z]`)
 var hasLowercaseRegex = regexp.MustCompile(`[a-z]`)
 var hasDigitRegex = regexp.MustCompile(`[0-9]`)
+var emailRegex = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+
+const ldapPasswordHint = "请在AD域修改账号密码"
 
 func isNumeric(s string) bool {
 	return numericRegex.MatchString(s)
@@ -39,6 +44,12 @@ func isPasswordValid(password string) bool {
 type Handler struct {
 	service *service.DomainService
 	auth    *auth.Auth
+	ldap    *ldapauth.Client
+}
+
+type ldapLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 type updateOneRequest struct {
@@ -135,8 +146,8 @@ type adminResetPasswordRequest struct {
 	UserID int64 `json:"user_id"`
 }
 
-func NewHandler(svc *service.DomainService, auth *auth.Auth) *Handler {
-	return &Handler{service: svc, auth: auth}
+func NewHandler(svc *service.DomainService, auth *auth.Auth, ldap *ldapauth.Client) *Handler {
+	return &Handler{service: svc, auth: auth, ldap: ldap}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
@@ -148,8 +159,10 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	{
 		authGroup.GET("/captcha", h.captchaImage)
 		authGroup.GET("/check-exists", h.checkExists)
+		authGroup.GET("/auth/providers", h.authProviders)
 		authGroup.POST("/register", h.register)
 		authGroup.POST("/login", h.login)
+		authGroup.POST("/login/ldap", h.loginLDAP)
 		authGroup.POST("/reset-password", h.requestResetPassword)
 		authGroup.POST("/change-password", h.changePassword)
 	}
@@ -209,12 +222,17 @@ func (h *Handler) getUserInfo(c *gin.Context) {
 		return
 	}
 
+	authSource := strings.TrimSpace(user.AuthSource)
+	if authSource == "" {
+		authSource = store.AuthSourceLocal
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"user_id": userID,
-		"name":    user.Name,
-		"phone":   user.Phone,
-		"email":   user.Email,
-		"role":    role,
+		"user_id":     userID,
+		"name":        user.Name,
+		"phone":       user.PhoneValue(),
+		"email":       user.Email,
+		"role":        role,
+		"auth_source": authSource,
 	})
 }
 
@@ -282,6 +300,10 @@ func (h *Handler) updateOwnPassword(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
 		return
 	}
+	if user.IsLDAP() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": ldapPasswordHint})
+		return
+	}
 	if !h.auth.ComparePassword(user.PasswordHash, req.OldPassword) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "密码不正确"})
 		return
@@ -322,6 +344,10 @@ func (h *Handler) verifyOwnPassword(c *gin.Context) {
 	user, err := h.auth.GetStore().GetUserByID(userID.(int64))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+	if user.IsLDAP() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": ldapPasswordHint})
 		return
 	}
 
@@ -405,9 +431,10 @@ func (h *Handler) register(c *gin.Context) {
 
 	user := &store.User{
 		Name:         req.Username,
-		Phone:        req.Phone,
+		Phone:        store.PhonePtr(req.Phone),
 		Email:        req.Email,
 		PasswordHash: hash,
+		AuthSource:   store.AuthSourceLocal,
 		Role:         store.RoleWatcher,
 	}
 
@@ -417,6 +444,183 @@ func (h *Handler) register(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "user registered successfully"})
+}
+
+func (h *Handler) authProviders(c *gin.Context) {
+	providers := make([]gin.H, 0, 1)
+	if h.ldap != nil && h.ldap.Enabled() {
+		providers = append(providers, gin.H{
+			"id":    "ldap",
+			"type":  "ldap",
+			"label": h.ldap.Label(),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"providers": providers})
+}
+
+func (h *Handler) loginLDAP(c *gin.Context) {
+	if h.ldap == nil || !h.ldap.Enabled() {
+		c.JSON(http.StatusNotFound, gin.H{"error": "LDAP 登录未启用"})
+		return
+	}
+	var req ldapLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	info, err := h.ldap.Authenticate(req.Username, req.Password)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	user, _, err := h.ensureLDAPUser(info)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	token, err := h.auth.GenerateToken(user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"token":       token,
+		"role":        string(user.Role),
+		"name":        user.Name,
+		"phone":       user.PhoneValue(),
+		"email":       user.Email,
+		"auth_source": store.AuthSourceLDAP,
+	})
+}
+
+// ensureLDAPUser 按 LDAP 用户名匹配本地账号；不存在则创建观察者。
+func (h *Handler) ensureLDAPUser(info *ldapauth.UserInfo) (*store.User, bool, error) {
+	username := strings.TrimSpace(info.Username)
+	if username == "" {
+		return nil, false, fmt.Errorf("LDAP 用户名无效")
+	}
+	st := h.auth.GetStore()
+
+	user, err := st.GetUserByName(username)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 软删除用户仍占用唯一键时，恢复并复用，避免 Duplicate entry
+		if deleted, e := st.GetUserByNameUnscoped(username); e == nil && deleted != nil && deleted.DeletedAt.Valid {
+			if restoreErr := st.RestoreUser(deleted.ID); restoreErr != nil {
+				return nil, false, restoreErr
+			}
+			user = deleted
+			err = nil
+		}
+	}
+	if err == nil {
+		if syncErr := h.syncLDAPUserFields(user, info, username); syncErr != nil {
+			return nil, false, syncErr
+		}
+		user, _ = st.GetUserByName(username)
+		return user, false, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+
+	email := resolveLDAPEmail(info.Email, username)
+	if existing, e := st.GetUserByEmail(email); e == nil && existing != nil {
+		email = ldapPlaceholderEmail(username + "." + fmt.Sprintf("%d", time.Now().Unix()%100000))
+	}
+
+	randPwd := generateRandomPassword(16)
+	hash, err := h.auth.HashPassword(randPwd)
+	if err != nil {
+		return nil, false, fmt.Errorf("hash password failed: %w", err)
+	}
+	newUser := &store.User{
+		Name:         username,
+		Phone:        nil,
+		Email:        email,
+		PasswordHash: hash,
+		AuthSource:   store.AuthSourceLDAP,
+		Role:         store.RoleWatcher,
+	}
+	if err := st.CreateUser(newUser); err != nil {
+		// 并发创建或软删竞态：回查已有账号并复用
+		if existing, e := st.GetUserByName(username); e == nil && existing != nil {
+			if syncErr := h.syncLDAPUserFields(existing, info, username); syncErr != nil {
+				return nil, false, syncErr
+			}
+			existing, _ = st.GetUserByName(username)
+			return existing, false, nil
+		}
+		if deleted, e := st.GetUserByNameUnscoped(username); e == nil && deleted != nil {
+			if deleted.DeletedAt.Valid {
+				_ = st.RestoreUser(deleted.ID)
+			}
+			if syncErr := h.syncLDAPUserFields(deleted, info, username); syncErr != nil {
+				return nil, false, syncErr
+			}
+			deleted, _ = st.GetUserByName(username)
+			return deleted, false, nil
+		}
+		return nil, false, err
+	}
+	return newUser, true, nil
+}
+
+func (h *Handler) syncLDAPUserFields(user *store.User, info *ldapauth.UserInfo, username string) error {
+	updates := map[string]interface{}{}
+	if !user.IsLDAP() {
+		updates["auth_source"] = store.AuthSourceLDAP
+	}
+	if email := resolveLDAPEmail(info.Email, username); email != "" && email != user.Email {
+		if shouldSyncLDAPEmail(user.Email, email) {
+			if existing, e := h.auth.GetStore().GetUserByEmail(email); e != nil || existing == nil || existing.ID == user.ID {
+				updates["email"] = email
+			}
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return h.auth.GetStore().UpdateUserFields(user.ID, updates)
+}
+
+func ldapPlaceholderEmail(username string) string {
+	safe := strings.ToLower(username)
+	var b strings.Builder
+	for _, r := range safe {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	local := b.String()
+	if local == "" {
+		local = "ldapuser"
+	}
+	if len(local) > 64 {
+		local = local[:64]
+	}
+	return local + "@ldap.local"
+}
+
+func resolveLDAPEmail(raw, username string) string {
+	email := strings.TrimSpace(raw)
+	if email != "" && emailRegex.MatchString(email) {
+		return strings.ToLower(email)
+	}
+	return ldapPlaceholderEmail(username)
+}
+
+func shouldSyncLDAPEmail(current, fromLDAP string) bool {
+	current = strings.TrimSpace(strings.ToLower(current))
+	fromLDAP = strings.TrimSpace(strings.ToLower(fromLDAP))
+	if fromLDAP == "" || fromLDAP == current {
+		return false
+	}
+	if strings.HasSuffix(current, "@ldap.local") {
+		return true
+	}
+	return current == ""
 }
 
 func (h *Handler) login(c *gin.Context) {
@@ -452,6 +656,10 @@ func (h *Handler) login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
+	if user.IsLDAP() {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "该账号为 LDAP 用户，请使用 AD 登录"})
+		return
+	}
 
 	if !h.auth.ComparePassword(user.PasswordHash, req.Password) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
@@ -464,7 +672,18 @@ func (h *Handler) login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"token": token, "role": string(user.Role), "name": user.Name})
+	authSource := strings.TrimSpace(user.AuthSource)
+	if authSource == "" {
+		authSource = store.AuthSourceLocal
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"token":       token,
+		"role":        string(user.Role),
+		"name":        user.Name,
+		"phone":       user.PhoneValue(),
+		"email":       user.Email,
+		"auth_source": authSource,
+	})
 }
 
 func (h *Handler) checkExists(c *gin.Context) {
@@ -517,6 +736,10 @@ func (h *Handler) requestResetPassword(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "重置密码已发送到您的注册邮箱xxxx@xxx.xx"})
+		return
+	}
+	if user.IsLDAP() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": ldapPasswordHint})
 		return
 	}
 
@@ -622,6 +845,10 @@ func (h *Handler) changePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token"})
 		return
 	}
+	if user.IsLDAP() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": ldapPasswordHint})
+		return
+	}
 	if h.auth.ComparePassword(user.PasswordHash, req.NewPassword) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "new password must be different from current password"})
 		return
@@ -683,12 +910,17 @@ func (h *Handler) listUsers(c *gin.Context) {
 
 	result := make([]gin.H, 0, len(users))
 	for _, u := range users {
+		authSource := strings.TrimSpace(u.AuthSource)
+		if authSource == "" {
+			authSource = store.AuthSourceLocal
+		}
 		result = append(result, gin.H{
-			"id":    u.ID,
-			"name":  u.Name,
-			"phone": u.Phone,
-			"email": u.Email,
-			"role":  string(u.Role),
+			"id":          u.ID,
+			"name":        u.Name,
+			"phone":       u.PhoneValue(),
+			"email":       u.Email,
+			"role":        string(u.Role),
+			"auth_source": authSource,
 		})
 	}
 
@@ -757,9 +989,10 @@ func (h *Handler) createUser(c *gin.Context) {
 
 	user := &store.User{
 		Name:         req.Username,
-		Phone:        req.Phone,
+		Phone:        store.PhonePtr(req.Phone),
 		Email:        req.Email,
 		PasswordHash: hash,
+		AuthSource:   store.AuthSourceLocal,
 		Role:         role,
 	}
 
@@ -836,6 +1069,10 @@ func (h *Handler) adminResetPassword(c *gin.Context) {
 
 	if user.Role == store.RoleRoot {
 		c.JSON(http.StatusForbidden, gin.H{"error": "cannot reset root password"})
+		return
+	}
+	if user.IsLDAP() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": ldapPasswordHint})
 		return
 	}
 

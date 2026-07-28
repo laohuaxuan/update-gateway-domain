@@ -13,6 +13,7 @@ import (
 	"update-gateway-domain/internal/auth"
 	"update-gateway-domain/internal/config"
 	"update-gateway-domain/internal/httpapi"
+	"update-gateway-domain/internal/ldapauth"
 	"update-gateway-domain/internal/mse"
 	"update-gateway-domain/internal/service"
 	"update-gateway-domain/internal/store"
@@ -76,7 +77,8 @@ func main() {
 	}
 
 	domainService := service.NewDomainService(clientManager, cfg, auditLogger, db)
-	handler := httpapi.NewHandler(domainService, authService)
+	ldapClient := ldapauth.New(cfg.Auth.LDAP)
+	handler := httpapi.NewHandler(domainService, authService, ldapClient)
 
 	router := gin.Default()
 	handler.RegisterRoutes(router)

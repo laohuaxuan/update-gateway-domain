@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/driver/mysql"
@@ -17,16 +18,45 @@ const (
 	RoleWatcher Role = "watcher"
 )
 
+const (
+	AuthSourceLocal = "local"
+	AuthSourceLDAP  = "ldap"
+)
+
 type User struct {
 	ID           int64 `gorm:"primaryKey;autoIncrement"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 	Name         string         `gorm:"uniqueIndex;size:100"`
-	Phone        string         `gorm:"uniqueIndex;size:20"`
+	Phone        *string        `gorm:"uniqueIndex;size:30"` // 可空；空手机号存 NULL
 	Email        string         `gorm:"uniqueIndex;size:100"`
 	PasswordHash string         `gorm:"size:255"`
+	AuthSource   string         `gorm:"size:20;default:local;index"` // local / ldap
 	Role         Role           `gorm:"size:20;default:watcher"`
+}
+
+func (u *User) IsLDAP() bool {
+	if u == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(u.AuthSource), AuthSourceLDAP)
+}
+
+func (u *User) PhoneValue() string {
+	if u == nil || u.Phone == nil {
+		return ""
+	}
+	return strings.TrimSpace(*u.Phone)
+}
+
+// PhonePtr 空字符串转为 nil，便于写入 NULL。
+func PhonePtr(phone string) *string {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil
+	}
+	return &phone
 }
 
 type ResetToken struct {
@@ -146,6 +176,10 @@ func (s *Store) GetUserByEmail(email string) (*User, error) {
 }
 
 func (s *Store) GetUserByPhone(phone string) (*User, error) {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
 	var user User
 	if err := s.db.Where("phone = ?", phone).First(&user).Error; err != nil {
 		return nil, err
@@ -153,12 +187,42 @@ func (s *Store) GetUserByPhone(phone string) (*User, error) {
 	return &user, nil
 }
 
+func (s *Store) UpdateUserFields(id int64, fields map[string]interface{}) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	return s.db.Model(&User{}).Where("id = ?", id).Updates(fields).Error
+}
+
 func (s *Store) GetUserByName(name string) (*User, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
 	var user User
-	if err := s.db.Where("name = ?", name).First(&user).Error; err != nil {
+	// 大小写不敏感匹配，避免 AD 规范化用户名与本地大小写不一致
+	if err := s.db.Where("LOWER(name) = LOWER(?)", name).First(&user).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil
+}
+
+// GetUserByNameUnscoped 包含软删除记录，用于 LDAP 登录复用已占用用户名。
+func (s *Store) GetUserByNameUnscoped(name string) (*User, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var user User
+	if err := s.db.Unscoped().Where("LOWER(name) = LOWER(?)", name).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// RestoreUser 清除软删除标记。
+func (s *Store) RestoreUser(id int64) error {
+	return s.db.Unscoped().Model(&User{}).Where("id = ?", id).Update("deleted_at", nil).Error
 }
 
 func (s *Store) GetUserByRole(role Role) (*User, error) {
@@ -173,8 +237,20 @@ func (s *Store) UpdateUserRole(id int64, role Role) error {
 	return s.db.Model(&User{}).Where("id = ?", id).Update("role", role).Error
 }
 
+// DeleteUser 硬删除用户及其关联数据，释放 name/phone/email 唯一键以便重新注册或 LDAP 登录。
 func (s *Store) DeleteUser(id int64) error {
-	return s.db.Delete(&User{}, id).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("user_id = ?", id).Delete(&ResetToken{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&PasswordResetRequestLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&PasswordSecurityAuditLog{}).Error; err != nil {
+			return err
+		}
+		return tx.Unscoped().Delete(&User{}, id).Error
+	})
 }
 
 func (s *Store) UpdateProfile(id int64, updates map[string]interface{}) error {

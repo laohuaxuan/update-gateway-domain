@@ -36,6 +36,26 @@ function EyeToggleIcon({ visible }) {
   );
 }
 
+function LdapIcon() {
+  return (
+    <svg className="third-party-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M12 2a4 4 0 0 1 4 4v1h1.5A2.5 2.5 0 0 1 20 9.5V11h-2v-.5a.5.5 0 0 0-.5-.5H14V6a2 2 0 1 0-4 0v4H6.5a.5.5 0 0 0-.5.5V11H4V9.5A2.5 2.5 0 0 1 6.5 7H8V6a4 4 0 0 1 4-4zm-6 11h12v2H6v-2zm1 4h4v2H7v-2zm6 0h4v2h-4v-2z"
+      />
+    </svg>
+  );
+}
+
+function persistLogin(data) {
+  localStorage.setItem("token", data.token);
+  localStorage.setItem("role", data.role || "");
+  localStorage.setItem("name", data.name || "");
+  localStorage.setItem("email", data.email || "");
+  localStorage.setItem("phone", data.phone || "");
+  localStorage.setItem("auth_source", data.auth_source || "local");
+}
+
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -46,6 +66,14 @@ export default function Login({ onLogin }) {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
   const [loading, setLoading] = useState(false);
+  const [ldapLabel, setLdapLabel] = useState("LDAP");
+  const [ldapEnabled, setLdapEnabled] = useState(false);
+  const [ldapModalOpen, setLdapModalOpen] = useState(false);
+  const [ldapUsername, setLdapUsername] = useState("");
+  const [ldapPassword, setLdapPassword] = useState("");
+  const [ldapPasswordVisible, setLdapPasswordVisible] = useState(false);
+  const [ldapLoading, setLdapLoading] = useState(false);
+  const [ldapMessage, setLdapMessage] = useState("");
   const messageTimeoutRef = useRef(null);
   const navigate = useNavigate();
 
@@ -58,6 +86,10 @@ export default function Login({ onLogin }) {
     messageTimeoutRef.current = setTimeout(() => {
       setMessage("");
     }, 3000);
+  };
+
+  const showLdapMessage = (text) => {
+    setLdapMessage(text || "");
   };
 
   const refreshCaptcha = () => {
@@ -86,8 +118,8 @@ export default function Login({ onLogin }) {
       const resp = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          username, 
+        body: JSON.stringify({
+          username,
           password,
           captcha_token: captchaToken,
           captcha_code: captchaCode,
@@ -97,9 +129,7 @@ export default function Login({ onLogin }) {
       if (!resp.ok) {
         throw new Error(data.error || "登录失败");
       }
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("role", data.role);
-      localStorage.setItem("name", data.name);
+      persistLogin(data);
       onLogin && onLogin(data);
       navigate("/");
     } catch (err) {
@@ -107,6 +137,39 @@ export default function Login({ onLogin }) {
       refreshCaptcha();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const submitLdapLogin = async (e) => {
+    e.preventDefault();
+    showLdapMessage("");
+    if (!ldapUsername.trim() || !ldapPassword) {
+      showLdapMessage("请输入 LDAP 用户名和密码");
+      return;
+    }
+    setLdapLoading(true);
+    try {
+      const resp = await fetch("/api/login/ldap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: ldapUsername.trim(),
+          password: ldapPassword,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || "LDAP 登录失败");
+      }
+      persistLogin(data);
+      onLogin && onLogin(data);
+      setLdapModalOpen(false);
+      showLdapMessage("");
+      navigate("/");
+    } catch (err) {
+      showLdapMessage(err.message || "LDAP 登录失败");
+    } finally {
+      setLdapLoading(false);
     }
   };
 
@@ -133,6 +196,17 @@ export default function Login({ onLogin }) {
 
   useEffect(() => {
     refreshCaptcha();
+    fetch("/api/auth/providers")
+      .then((r) => r.json())
+      .then((data) => {
+        const providers = Array.isArray(data.providers) ? data.providers : [];
+        const ldap = providers.find((p) => p.id === "ldap" || p.type === "ldap");
+        if (ldap) {
+          setLdapEnabled(true);
+          setLdapLabel(ldap.label || "LDAP");
+        }
+      })
+      .catch(() => {});
   }, []);
 
   return (
@@ -140,8 +214,8 @@ export default function Login({ onLogin }) {
       <div className="auth-card">
         <h1>欢迎登录MSE网关管理系统</h1>
         <h2>登录</h2>
-        {message && <div className={`message ${messageType === 'error' ? 'message-error' : ''}`}>{message}</div>}
-        
+        {message && <div className={`message ${messageType === "error" ? "message-error" : ""}`}>{message}</div>}
+
         <form onSubmit={handleSubmit}>
           <div>
             <label>用户名/手机号</label>
@@ -200,6 +274,27 @@ export default function Login({ onLogin }) {
             {loading ? "登录中..." : "登录"}
           </button>
         </form>
+        {ldapEnabled && (
+          <div className="third-party-login">
+            <span className="third-party-label">第三方登录：</span>
+            <button
+              type="button"
+              className="third-party-btn"
+              title={`${ldapLabel} 登录`}
+              aria-label={`${ldapLabel} 登录`}
+              onClick={() => {
+                setLdapUsername("");
+                setLdapPassword("");
+                setLdapPasswordVisible(false);
+                setLdapMessage("");
+                setLdapModalOpen(true);
+              }}
+            >
+              <LdapIcon />
+              <span>{ldapLabel}</span>
+            </button>
+          </div>
+        )}
         <div className="auth-links">
           <button type="button" className="link-btn" onClick={handleResetPassword}>
             忘记密码？
@@ -208,6 +303,74 @@ export default function Login({ onLogin }) {
           <Link to="/register">注册新账号</Link>
         </div>
       </div>
+
+      {ldapModalOpen && (
+        <div
+          className="modal-mask"
+          onClick={() => {
+            if (!ldapLoading) {
+              setLdapModalOpen(false);
+              setLdapMessage("");
+            }
+          }}
+        >
+          <div className="modal-card ldap-login-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{ldapLabel} 登录</h2>
+            {ldapMessage && <div className="message message-error">{ldapMessage}</div>}
+            <form onSubmit={submitLdapLogin}>
+              <div className="form-group">
+                <label>用户名</label>
+                <input
+                  type="text"
+                  value={ldapUsername}
+                  onChange={(e) => setLdapUsername(e.target.value)}
+                  required
+                  autoFocus
+                  placeholder="请输入 LDAP 用户名"
+                  autoComplete="username"
+                />
+              </div>
+              <div className="form-group">
+                <label>密码</label>
+                <div className="password-input-row">
+                  <input
+                    type={ldapPasswordVisible ? "text" : "password"}
+                    value={ldapPassword}
+                    onChange={(e) => setLdapPassword(e.target.value)}
+                    required
+                    placeholder="请输入 LDAP 密码"
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    title={ldapPasswordVisible ? "隐藏密码" : "显示密码"}
+                    aria-label={ldapPasswordVisible ? "隐藏密码" : "显示密码"}
+                    onClick={() => setLdapPasswordVisible((v) => !v)}
+                  >
+                    <EyeToggleIcon visible={ldapPasswordVisible} />
+                  </button>
+                </div>
+              </div>
+              <div className="row">
+                <button
+                  type="button"
+                  disabled={ldapLoading}
+                  onClick={() => {
+                    setLdapModalOpen(false);
+                    setLdapMessage("");
+                  }}
+                >
+                  取消
+                </button>
+                <button type="submit" disabled={ldapLoading}>
+                  {ldapLoading ? "登录中..." : "登录"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

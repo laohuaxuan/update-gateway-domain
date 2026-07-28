@@ -194,7 +194,8 @@ body {
   display: none;
 }
 
-.user-menu:hover .user-dropdown {
+.user-menu:hover .user-dropdown,
+.user-menu.keep-open .user-dropdown {
   display: block;
 }
 
@@ -721,6 +722,72 @@ tbody tr:last-child td:last-child {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
 }
 
+.modal-card.ldap-login-modal {
+  width: min(400px, 92vw);
+  max-height: none;
+  padding: 24px 28px;
+}
+
+.modal-card.ldap-login-modal h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.modal-card.ldap-login-modal .message {
+  margin: 0 0 12px;
+}
+
+.modal-card.ldap-login-modal .form-group input,
+.modal-card.ldap-login-modal .password-input-row {
+  max-width: 100%;
+}
+
+.modal-card.ldap-login-modal .password-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal-card.ldap-login-modal .row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.modal-card.role-modal {
+  width: min(420px, 92vw);
+  max-height: none;
+}
+
+.modal-card.role-modal h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.role-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.role-modal-actions select {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+}
+
+.role-modal-actions button {
+  flex-shrink: 0;
+}
+
 .error-list {
   margin: 0;
   padding-left: 20px;
@@ -1120,6 +1187,58 @@ body.dark .auth-card .password-toggle-btn {
 body.dark .auth-card .password-toggle-btn:hover:not(:disabled) {
   background: #1a4a7a;
   color: #e0e0e0;
+}
+
+.third-party-login {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #eef0f3;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.third-party-label {
+  flex-shrink: 0;
+}
+
+.third-party-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.third-party-btn:hover {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+
+.third-party-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.muted-text {
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.form-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
 }
 
 .auth-links {
